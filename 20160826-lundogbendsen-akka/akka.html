@@ -22,44 +22,154 @@
 
 class: center, middle
 
-# Concurrency
+# Concurrency models
 
-- Logically run several units of work, seemingly in parallel
+- Threads and locks
+- Futures and callbacks
+- Actor model
+- Reactive streams
+
+- Java examples
+
+---
 
 # Parallellism
 
 - Actually run several units of work simultaneously
 
+--
+
+# Concurrency
+
+- Logically run several units of work, seemingly in parallel
+
+---
+
+Threads and mutexes
+
+- *Thread* : logical thread of execution, scheduled by OS scheduler
+- All threads share one memory space
+- *Mutex* : _mutually exclusive_ flag that prevents threads from accessing shared resources
+
+--
+
+Advantages
+- Close to how the hardware actually works
+- The only model generally tought in school
+- Blocking on I/O natually equivalent to "this, then this"
+
+Disadvantages
+- Expensive (~1M stack)
+- Slow to create/destroy
+- Deadlock
+
 ---
 
 # Futures and callbacks
 
-- Describe the programming style
+- Asynchronous operation returns an object that _eventually_ yields a result
+  - Scala, Finagle, Q.js, ... : Promise / Future
+  - Java 8: CompletionStage / CompletableFuture
+- Can be chained, causing further processing (and further futures) after a stage 
+  completes
+- Can be merged, waiting for several futures' results before commencing 
+
+Advantages
+- Simple to grasp
+
+Disadvantages
+- "callback hell"
+- no backpressure
+- not (easily) cancellable
+- still needs locking (unless using a single thread)
 
 ---
 
 # Cores and caches
 
-- Put table of memory latencies here
+- Latency Comparison Numbers
+
+    L1 cache reference                           0.5 ns
+    Branch mispredict                            5   ns
+    L2 cache reference                           7   ns
+    Mutex lock/unlock                           25   ns
+    Main memory reference                      100   ns
+    Compress 1K bytes with Zippy             3,000   ns
+    Context switch                          10,000   ns (if working set in L2)
+    Send 1K bytes over 1 Gbps network       10,000   ns
+    Context switch                        >100,000   ns (bigger working set)
+    Read 4K randomly from SSD*             150,000   ns
+    Read 1 MB sequentially from memory     250,000   ns
+    Round trip within same datacenter      500,000   ns
+    Read 1 MB sequentially from SSD*     1,000,000   ns
+    Disk seek                           10,000,000   ns
+    Read 1 MB sequentially from disk    20,000,000   ns
+    Send packet CA->Netherlands->CA    150,000,000   ns
+
+- Keep working on the same data for as long as possible
 
 ---
 
 # The actor model
 
-- Introduction and rationale
+- *Actor* is an entity that responds only to messages by
+  - sending messages to other actors
+  - creating other, child, actors
+  - adjusting its behaviour
 
-- Specific semantics of akka's actor model
+- *Akka* is a toolkit for writing actors in Java
+  - Actor is a normal Java class that extends `UntypedActor` or `AbstractActor`
 
-- Immutability
+- *Message* is an immutable, serializable, Java class
 
 ---
 
 # Actor ping pong 
 
-- Show ping pong, in Java 8
+```java
+public class PingActor extends UntypedActor {
+
+    private int counter = 0;
+    private ActorRef pongActor = getContext().actorOf(Props.create(PongActor.class), "pongActor");
+
+    public void onReceive(Object message) throws Exception {
+        if (message instanceof Initialize) {
+            log.info("In PingActor - starting ping-pong");
+            pongActor.tell("ping", getSelf());
+        } else if (message instanceof String) {
+            log.info("In PingActor - received message: {}", message);
+            counter += 1;
+            if (counter == 3) {
+                getContext().system().shutdown();
+            } else {
+                getSender().tell("ping", getSelf());
+            }
+        } else {
+            unhandled(message);
+        }
+    }
+}
+```
 
 ---
 
+# Actor ping pong 
+
+```java
+public class PongActor extends UntypedActor {
+
+    public void onReceive(Object message) throws Exception {
+        if (message instanceof String) {
+            log.info("In PongActor - received message: {}", message);
+            getSender().tell("pong", getSelf());
+        } else {
+            unhandled(message);
+        }
+    }
+}
+```
+
+---
 # Backpressure
 
 - Thread backpressure: read 1.000.000 rows from DB, a few at a time. Blocks when outgoing socket blocks.
@@ -100,7 +210,7 @@ class: center, middle
 
 
     </textarea>
-    <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js"></script>
+    <script src="remark-latest.min.js"></script>
     <script>
       var slideshow = remark.create({
           highlightLanguage: "java",
