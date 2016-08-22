@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+  <head><base href="http://raw.githubusercontent.com/Tradeshift/ts-reaktive/master/ts-reaktive-marshal/doc/presentation.html">
+    <title>Title</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+      .small { font-size: 75%; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Concurrency
+
+- Logically run several units of work, seemingly in parallel
+
+# Parallellism
+
+- Actually run several units of work simultaneously
+
+---
+
+# Futures and callbacks
+
+- Describe the programming style
+
+---
+
+# Cores and caches
+
+- Put table of memory latencies here
+
+---
+
+# The actor model
+
+- Introduction and rationale
+
+- Specific semantics of akka's actor model
+
+- Immutability
+
+---
+
+# Actor ping pong 
+
+- Show ping pong, in Java 8
+
+---
+
+# Backpressure
+
+- Thread backpressure: read 1.000.000 rows from DB, a few at a time. Blocks when outgoing socket blocks.
+
+- Aktor backpressure: none, needs protocol
+
+- Streams!
+
+---
+
+# Introduction to akka streams
+
+- GraphStage, Inlets, Outlets
+
+- Source, Sink, Flow
+
+---
+
+# Some example sources
+
+---
+
+# Some example flow manipulators
+
+---
+
+# Some example sinks
+
+---
+
+# Comparison of the four models
+
+- Futures and callbacks: can't be aborted
+
+---
+
+# Writing HTTP services using akka streams in Java
+
+
+    </textarea>
+    <script type="text/htmlpreview" src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
+    </script>
+    <script type="text/htmlpreview">
+      var slideshow = remark.create({
+          highlightLanguage: "java",
+          highlightLines: true
+      });
+    </script>
+  <script src="//htmlpreview.github.io/htmlpreview.min.js"></script><script>HTMLPreview.replaceAssets();</script></body>
+</html>
