@@ -248,9 +248,9 @@ Disadvantages
 - All built-in graph stages embrace _backpressure_ and _bounded processing_
 
 #### Mostly used graph stages
-- `Source<T,M>` has one outlet of type `T`
-- `Sink<T,M>` has one inlet of type `T` 
-- `Flow<A,B,M>` has one inlet of type `A` and one outlet of type `B`
+- `Source<T, M>` has one outlet of type `T`
+- `Sink<T, M>` has one inlet of type `T` 
+- `Flow<A, B, M>` has one inlet of type `A` and one outlet of type `B`
 
 #### Reactive streams
 - Akka is a reactive streams implementation (just like `RxJava` and others)
@@ -264,9 +264,9 @@ Disadvantages
 final ActorSystem system = ActorSystem.create("QuickStart");
 final Materializer materializer = ActorMaterializer.create(system);
 
-final Source<Integer, NotUsed> numbers = Source.range(1, 100);
+final Source<Integer，NotUsed> numbers = Source.range(1, 100);
 
-final Sink<Integer, CompletionStage<Done>> print = 
+final Sink<Integer，CompletionStage<Done>> print = 
     Sink.foreach(i -> System.out.println(i));
 
 final CompletionStage<Done> done = numbers.runWith(print, materializer);
@@ -276,7 +276,6 @@ final CompletionStage<Done> done = numbers.runWith(print, materializer);
 // 2
 // ...
 ```
-
 ---
 
 # Stream materialization
@@ -294,15 +293,15 @@ final CompletionStage<Done> done = numbers.runWith(print, materializer);
    constructed in reusable factory methods:
 
 ```
-public Sink<String, CompletionStage<IOResult>> lineSink(String filename) {
-  Sink<ByteString,CompletionStage<IOResult>> file = 
+public Sink<String，CompletionStage<IOResult>> lineSink(String filename) {
+  Sink<ByteString，CompletionStage<IOResult>> file = 
       FileIO.toPath(Paths.get(filename);
 
-  // Let's start with some strings. This gives us a Flow<String,String,NotUsed>
+  // Let's start with some strings. This gives us a Flow<String，String，NotUsed>
   return Flow.of(String.class)
   
   // Convert them into bytes (UTF-8), adding a newline
-  // We now have a Flow<String,ByteString,NotUsed>
+  // We now have a Flow<String，ByteString，NotUsed>
     .map(s -> ByteString.fromString(s + "\n"))
     
   // Send them into a file, and we want the IOResult of the
@@ -314,12 +313,13 @@ numbers.runWith(lineSink("numbers.txt"), materializer);
 ```
 
 ---
+
 # Time-based processing
 
 ```
-final Source<Integer, NotUsed> numbers = Source.range(1, 100000000);
+final Source<Integer，NotUsed> numbers = Source.range(1, 100000000);
 
-final Sink<Integer, CompletionStage<Done>> print = 
+final Sink<Integer，CompletionStage<Done>> print = 
     Sink.foreach(i -> System.out.println(i));
 
 final CompletionStage<Done> done = numbers
@@ -332,6 +332,81 @@ final CompletionStage<Done> done = numbers
 - No `OutOfMemoryError`, akka buffers only as needed: _backpressure_
 ---
 
+# Example Sources
+- Materialize as `ActorRef`
+
+```
+Source<T，ActorRef> s = Source.actorRef(10, OverflowStrategy.fail());
+```
+
+- Materialize as reactive `Subscriber<T>`
+
+```
+Source<T，Subscriber<T>> s = Source.asSubscriber();
+```
+
+- Read from a reactive `Publisher<T> p`
+
+```
+Source<T，NotUsed> s = Source.fromPublisher(p);
+```
+
+- Emit the same element regularly
+
+```
+Source<T，Cancellable> s = Source.tick(duration, duration, element);
+```
+---
+
+# Example Sinks
+- Send to `ActorRef`
+
+```
+Sink<T，NotUsed> s = Sink.actorRef(target, "done");
+```
+
+- Materialize as reactive `Publisher<T>`
+
+```
+Sink<T，Publisher<T>> s = Sink.asPublisher(WITH_FANOUT);
+```
+
+- Materialize into a `java.util.List` of all elements
+
+```
+Sink<T，List<T>> s = Sink.seq();
+```
+
+---
+
+# Example source and flow operators
+- Send `Source<String，M> src` to an additional `Sink<String> sink`
+
+```
+Source<String，M> s = src.alsoTo(sink);
+```
+
+- Process batches of concatenated strings, but only if coming in too fast
+
+```
+Source<String，M> s = src.batchWeighted(1000, s -> s.length(), 
+                                        s -> s, (s1,s2) -> s1 + s2);
+```
+
+- Process 1 seconds' worth of elements at a time, but at most 100
+
+```
+Source<List<String>，M> s = src.groupedWithin(100, Duration.create(1, SECONDS));
+```
+
+- Invoke a `CompletionStage` for each element, and resume with the results in order
+
+```
+CompletionStage<Integer> process(String s) { ... }
+Source<String，M> s = src.mapAsync(this::process);
+```
+
+---
 
 # Comparison of the four models
 
@@ -339,8 +414,44 @@ final CompletionStage<Done> done = numbers
 
 ---
 
-# Writing HTTP services using akka streams in Java
+# Akka HTTP (server)
 
+
+```
+final Route route = get(() ->
+    path("/", () ->
+        complete("Hello, world!") 
+    )
+);
+
+final Flow<HttpRequest，HttpResponse，NotUsed> handler = 
+    route.flow(system, materializer);
+final CompletionStage<ServerBinding> binding = Http.get(system).bindAndHandle(
+    handler, ConnectHttp.toHost("127.0.0.1", 8080), materializer);    
+```
+
+- `Route` contains asynchronous processing of an HTTP request
+  - Delegates to nested inner routes
+- Convertable to a `Flow<HttpRequest，HttpResponse>` in order to become a real HTTP server
+
+---
+# Directives
+
+- The `get`, `path`, `complete` methods are called _directives_
+- *Directive* is a method that returns a `Route`
+
+```
+/** Returns a route which invokes the inner route if the request has GET as method */
+public Route get(Supplier<Route> inner);
+/** Returns a route which invokes the inner route if the first path segment is equal to [segment] */
+public Route path(String segment, Supplier<Route> inner);
+/** Returns a route which completes the request with 200 OK and the given body as UTF-8 */
+public Route complete(String body);
+```
+
+# Marshalling
+
+```
 
     </textarea>
     <script src="remark-latest.min.js"></script>
