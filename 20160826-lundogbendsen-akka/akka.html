@@ -160,6 +160,11 @@ Send packet CA->Netherlands->CA    150,000,000   ns
 
 - *Message* is an immutable, serializable, Java class
 
+- Parent actor is the _supervisor_ of its child actors. On child actor failure, parent decides what to do:
+  - Restart child
+  - Stop child
+  - Escalate
+  
 ---
 
 # Actor ping pong 
@@ -441,17 +446,101 @@ final CompletionStage<ServerBinding> binding = Http.get(system).bindAndHandle(
 - *Directive* is a method that returns a `Route`
 
 ```
-/** Returns a route which invokes the inner route if the request has GET as method */
+/** Invokes the inner route if the request has GET as method */
 public Route get(Supplier<Route> inner);
-/** Returns a route which invokes the inner route if the first path segment is equal to [segment] */
+/** Invokes the inner route if the first path segment is [segment] */
 public Route path(String segment, Supplier<Route> inner);
-/** Returns a route which completes the request with 200 OK and the given body as UTF-8 */
+/** Completes the request with 200 OK and the given body as UTF-8 */
 public Route complete(String body);
 ```
 
+- Invoking the directive method doesn't actually handle any HTTP requests (all directives are just factories for `Route` instances)
+
+---
 # Marshalling
+- Unmarshalling a request body into a Jackson-annotated class
 
 ```
+Route example = post(() -> 
+  entity(Jackson.unmarshaller(Person.class), person ->
+    complete("Hello, " + person.getName())
+  )
+);
+```
+
+- Marshalling a Jackson-annotated class into a response body
+
+```
+Route example = get(() -> 
+  completeOK(thePerson, Jackson.marshaller())
+);
+```
+
+---
+# Query and path parameters
+- Extracting several parameters for `?q=foo&q=bar&limit=100`
+
+```
+Route example = 
+  parameterOptional(INTEGER, "limit", limit ->   // type Optional<Integer>
+    parameterList("q", q ->                      // type List<String>
+      complete("You gave q " + q + " and limit " + limit)
+    )
+  );
+```
+
+- Extracting a UUID path parameter for `/documents/{uuid}/summary`
+
+```
+Route example =
+  pathPrefix("documents", () ->
+    pathPrefix(UUIDSegment, uuid ->              // type UUID
+      path("summary", () ->
+        complete("You hit document " + uuid) 
+      )
+    ) 
+  );
+```
+---
+
+class: center, middle
+
+# No annotations, no reflection, no AOP
+# NO MAGIC!
+
+---
+# Other directives
+- Complete route when a `CompletionStage f` succeeds
+
+```
+Route r = onSuccess(f, result -> complete("result was " + result));
+```
+
+- Handle incoming web socket request
+
+```
+Flow<Message,Message,NotUsed> handler = ...
+Route r = handleWebSocketMessages(handler);
+```
+
+# Important other topics
+- Exception handling
+- Rejections and route matching
+
+---
+# Onwards
+
+- Current topics of development
+  - Performance optimizations
+  - Stabilization of akka http
+  - Non-blocking marshalling
+  
+- Want to get involved?
+  - Get:  [http://akka.io/](http://akka.io/)
+  - Read: [http://doc.akka.io/docs/akka/current/java.html](http://doc.akka.io/docs/akka/current/java.html)
+  - Chat: [https://gitter.im/akka/akka](https://gitter.im/akka/akka)
+  - Hack: [https://github.com/akka/akka/issues?q=label:community](https://github.com/akka/akka/issues?q=label:community)
+
 
     </textarea>
     <script src="remark-latest.min.js"></script>
