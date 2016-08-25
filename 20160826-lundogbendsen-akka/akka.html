@@ -27,6 +27,7 @@ class: center, middle
 
 
 Jan Ypma
+
 jyp@tradeshift.com
 
 ---
@@ -63,9 +64,9 @@ jyp@tradeshift.com
 
 # Threads and mutexes
 
-- *Thread* : logical thread of execution, scheduled by OS scheduler
+- **Thread** : logical thread of execution, scheduled by OS scheduler
 - All threads share one memory space
-- *Mutex* : _mutually exclusive_ flag that prevents threads from accessing shared resources
+- **Mutex** : _mutually exclusive_ flag that prevents threads from accessing shared resources
 
 --
 
@@ -83,8 +84,8 @@ Disadvantages
 
 # Futures and callbacks
 
-- Asynchronous operation returns an object that _eventually_ yields a result
-  - Scala, Finagle, Q.js, ... : `Promise` / `Future`
+- **Future** is a handle to a calculation which _eventually_ yields a result
+  - Scala, Finagle, Q.js, ... : _Future_ / _Promise_
   - Java 8: `CompletionStage<T>` / `CompletableFuture<T>`
 - Can be chained, causing further processing (and further futures) after a stage 
   completes
@@ -150,7 +151,7 @@ Send packet CA->Netherlands->CA    150,000,000   ns
 
 # The actor model
 
-- *Actor* is an entity that responds only to messages by
+- **Actor** is an entity that responds only to messages by
   - sending messages to other actors
   - creating other, child, actors
   - adjusting its behaviour
@@ -158,7 +159,7 @@ Send packet CA->Netherlands->CA    150,000,000   ns
 - *Akka* is a toolkit for writing actors in Java
   - Actor is a normal Java class that extends `UntypedActor` or `AbstractActor`
 
-- *Message* is an immutable, serializable, Java class
+- **Message** is an immutable, serializable, Java class
 
 - Parent actor is the _supervisor_ of its child actors. On child actor failure, parent decides what to do:
   - Restart child
@@ -247,15 +248,16 @@ Disadvantages
 ---
 
 # Introducing Akka Streams
-- `Graph` is a blueprint for a closed, finite data processing network where various stages consume and produce typed stream elements
+- `Graph` is a *blueprint* for a closed, finite network of *stages*, which communicate by streaming elements
 - `GraphStage<S extends Shape>` is one processing stage within a graph, taking elements in through zero or more *Inlets*, and emitting through *Outlets*
 - It's completely up to the stage when and how to respond to arriving elements
 - All built-in graph stages embrace _backpressure_ and _bounded processing_
 
 #### Mostly used graph stages
-- `Source<T, M>` has one outlet of type `T`
-- `Sink<T, M>` has one inlet of type `T` 
-- `Flow<A, B, M>` has one inlet of type `A` and one outlet of type `B`
+- `Source<T，M>` has one outlet of type `T`
+- `Sink<T，M>` has one inlet of type `T` 
+- `Flow<A，B，M>` has one inlet of type `A` and one outlet of type `B`
+- `RunnableGraph<M>` has no inlets or outlets
 
 #### Reactive streams
 - Akka is a reactive streams implementation (just like `RxJava` and others)
@@ -286,9 +288,28 @@ final CompletionStage<Done> done = numbers.runWith(print, materializer);
 # Stream materialization
 
 - _Graph_ is only a blueprint: nothing runs until it's given to a _materializer_, typically `ActorMaterializer`
-- _GraphStage_ has input and output types, but also in a _materialized value_, typically called `M`
-- Return type when the graph is actually ran
-- Graph can be materialized more than once
+- All graph stages are generic in their materialized type `M`
+- Graph can be materialized (`run`, `runWith`) more than once
+
+```
+class Source<T，M> {
+  // A graph which materializes into the M2 of the sink (ignoring source's M)
+  public RunnableGraph<M2> to(Sink<T,M2> sink);
+  
+  // Materializes, and returns the M of the sink (ignoring this source's M) 
+  public <M2> M2 runWith(Sink<T，M2> sink, Materializer m) { ... }
+  
+  // A graph which materializes into the result of applying [combine] to 
+  // this source's M and the sink's M2 
+  public <M2, MR> RunnableGraph<MR> toMat(Sink<T,M2> sink, 
+                                          Function2<M,M2,MR> combine);
+}
+
+class RunnableGraph<M> {
+  public M run(Materializer m);
+}
+```
+
 
 ---
 
@@ -448,8 +469,16 @@ final CompletionStage<ServerBinding> binding = Http.get(system).bindAndHandle(
 ```
 /** Invokes the inner route if the request has GET as method */
 public Route get(Supplier<Route> inner);
+
+/** Invokes the inner route if the remaining path exactly is [p] */
+public Route path(String p, Supplier<Route> inner);
+
 /** Invokes the inner route if the first path segment is [segment] */
-public Route path(String segment, Supplier<Route> inner);
+public Route pathPrefix(String segment, Supplier<Route> inner);
+
+/** Invokes the function with the next path segment */
+public Route pathPrefix(PathMatchers.segment(), Function<String，Route> inner);
+
 /** Completes the request with 200 OK and the given body as UTF-8 */
 public Route complete(String body);
 ```
