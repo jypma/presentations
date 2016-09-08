@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Event sourcing at Tradeshift</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+      .small { font-size: 75%; }
+      .floatright { float: right; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Event sourcing at scale
+
+
+
+Jan Ypma
+
+jyp@tradeshift.com
+
+---
+
+# Agenda
+
+- A bit of Tradeshift history
+  - Typical sources of failures
+- Introduction to actors and akka
+- Event sourcing
+- Example use case: collaboration
+
+---
+
+# Tradeshift in 2011
+
+.center[![Tradeshift system](tsold.svg)]
+
+- Two major software components
+  - _the frontend_
+  - _the backend_
+- &lt;10 developers
+
+---
+
+# Tradeshift in 2016
+
+.center[![Tradeshift system](tsnew.svg)]
+
+- 30 deployed components (and growing)
+- 150 developers
+- 250.000 LoC in _the backend_
+
+---
+
+# Scaling of Tradeshift's systems
+
+- Moore's law applies to AWS 
+- Single point of _not quite failing often enough_
+
+
+- 2016 directive:
+
+    _All new components must be clustered_
+
+- Yeah, what about the 30-ish existing ones?
+  - New architecture is needed
+  
+---
+
+# Scaling of Tradehift's development process
+
+- 2011: _"We're a Java shop"_
+--
+
+- 2016: Not really, at least not anymore
+  - Groovy and grails
+  - Python, go, ruby for infrastructure
+  - Crazy javascript people
+  - Scala 
+- But still, mostly Java  
+  
+- Empower teams to pick their own language and frameworks
+
+---
+
+# Typical sources of failures
+
+.center[![Tradeshift flow](tsflow.svg)]
+
+- We're down!
+  - We overloaded the database
+  - which caused the backend to respond slowly
+  - which caused the frontend to respond slowly
+  - which caused our users' web browsers to respond slowly
+  - which caused our users to reload their page
+  - `GOTO 10`
+
+
+--
+
+- Enter the buzzwords
+  - Let it crash [2003, Amstrong]
+  - Micro-services [2005, Rodgers]
+  - Self-contained systems [2015, [scs-architecture.org](http://scs-architecture.org)]
+
+---
+
+# Self-contained systems
+
+.floatright[![Async comm](async.svg)]
+
+- No outgoing calls while handling an incoming request
+  - (except to our own databases)
+  - All inter-service communication must be **asynchronous**
+  - This implies data replication
+
+
+- No single points of failure
+  - System must be clustered
+  
+  
+- Design must trivially scale to 10x expected load
+
+---
+
+# Event sourcing
+
+.center[![Event sourcing](eventsource.svg)]
+
+- System considers an append-only **Event journal** the only source of truth
+- **Aggregate** is one unit of information to which (and only which) an event atomically applies
+- Events  have a guaranteed order, but only within an aggregate
+
+---
+
+# Event sourcing
+
+- Nice scalability properties
+  - Each aggregate can process changes independently
+- All information that spans >1 aggregate is materialized using *event listeners*
+
+- Traditionally only applied inside a system 
+  - Synchronous APIs only ("_get customer history_")
+  
+- Why not expose event stream itself?
+  - Eventual consistency
+  - Latency implications
+  - Security implications
+
+---
+
+# The actor model
+
+- **Actor** is an entity that responds only to messages by
+  - sending messages to other actors
+  - creating other, child, actors
+  - adjusting its behaviour
+
+- *Akka* is a toolkit for writing actors in Java
+  - Actor is a normal Java class that extends `UntypedActor` or `AbstractActor`
+
+- **Message** is an immutable, serializable, Java class
+
+- Parent actor is the _supervisor_ of its child actors. On child actor failure, parent decides what to do:
+  - Restart child
+  - Stop child
+  - Escalate
+  
+---
+
+# Actor ping pong 
+
+```
+public class PongActor extends UntypedActor {
+
+    public void onReceive(Object message) {
+        if (message instanceof String) {
+            System.out.println("In PongActor - received message: " + message);
+            getSender().tell("pong", getSelf());
+        } 
+    }
+}
+```
+
+---
+
+# Actor ping pong 
+
+```
+public class Initialize {}
+public class PingActor extends AbstractActor {
+    private int counter = 0;
+    private ActorRef pongActor = getContext().actorOf(
+        Props.create(PongActor.class), "pongActor");
+    {
+        receive(ReceiveBuilder
+            .match(Initialize.class, msg -> {
+                System.out.println("In PingActor - starting ping-pong");
+                pongActor.tell("ping", getSelf());
+            })
+            .match(String.class, msg -> {
+                System.out.println("In PingActor - received message: " + message);
+                counter += 1;
+                if (counter == 3) {
+                    getContext().system().shutdown();
+                } else {
+                    getSender().tell("ping", getSelf());
+                }
+            })
+            .build());
+    }
+}
+```
+
+---
+
+# Actor ping ping
+
+```
+public static void main() {
+    ActorSystem system = ActorSystem.create();
+    ActorRef pingActor = system.actorOf(Props.create(PingActor.class));
+    PingActor.tell(new Initialize());
+}
+```
+
+Output:
+```
+In PingActor - starting ping-pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+```
+
+---
+
+# Akka persistence
+
+- Framework to do event sourcing using actors
+- Persistence plugins for levelDB, cassandra, kafka, ...
+- Each `PersistentActor` has a `String` identifier, under which events are stored
+
+```j
+public class ChatActor extends AbstractPersistentActor {
+  private final List<String> messages = new ArrayList<>();
+  
+  @Override public String persistenceId() { return "67c67d28-4719-4bf9-bfe6-3944ed961a60"; }
+  
+  @Override public void receiveRecover(Object msg) {
+    if (msg instanceof String) { messages.add((String)msg); }
+  }
+  
+  @Override public void receiveCommand(Object msg) {
+    if (msg.equals("/list")) {
+      sender().tell(new ArrayList<>(messages));
+    } else if (msg instanceof String) { 
+      persist(msg, evt -> messages.add((String)msg));
+    } 
+  }
+}
+```
+
+---
+
+# Akka remoting and clustering
+
+- Transparently lets actors communicate between systems
+- `ActorRef` can point to a remote actor
+- Messages must be serializable (using configurable mechanisms)
+
+```
+    akka {
+      actor {
+        provider = "akka.remote.RemoteActorRefProvider"
+      }
+      remote {
+        enabled-transports = ["akka.remote.netty.tcp"]
+        netty.tcp {
+          hostname = "127.0.0.1"
+          port = 2552
+        }
+      }
+      cluster {
+        seed-nodes = [
+          "akka.tcp://ClusterSystem@127.0.0.1:2551",
+          "akka.tcp://ClusterSystem@127.0.0.1:2552"]
+      }
+    }
+```
+
+---
+
+# Akka cluster sharding
+
+- Dynamically distributes a group of actors across an akka cluster
+- `MessageExtractor` informs cluster sharding where a particular message should go
+
+```
+class ChatMessage { UUID conversation; String msg; }
+
+class MyMessageExtractor implements MessageExtractor {
+    private final int numberOfShards = 256;
+    
+    @Override public String entityId(Object command) {
+        return ChatMessage.cast(command).conversation.toString();
+    }
+
+    @Override public String shardId(Object command) {
+        return String.valueOf(entityId(command).hashCode() % numberOfShards);
+    }
+    
+    @Override public Object entityMessage(Object command) {
+        return ChatMessage.cast(command).msg;
+    }
+}
+
+```
+
+---
+
+# Akka cluster sharding
+
+- `ShardRegion` proxy sits between client and real (remote) persistent actor
+- Persistent actor names will be their persistence id
+
+```
+public class ChatActor extends AbstractPersistentActor {
+  // ...
+  
+  @Override public String persistenceId() { return getSelf().path().name(); }
+}
+
+ActorRef proxy = ClusterSharding.get(system).start(
+            "conversations",
+            Props.create(ChatActor.class),
+            ClusterShardingSettings.create(system), 
+            new MyMessageExtractor());
+
+proxy.tell(new ChatMessage(
+  UUID.fromString("67c67d28-4719-4bf9-bfe6-3944ed961a60"),
+  "hello!"));
+```
+
+---
+
+# Putting it all together
+
+- 2015: Let's try it out first
+
+- 2016: _Collaboration_ in production
+  - Real-time text message exchange between employees
+  - Text interface to automated travel agent
+  
+- In development: documents, FTP
+
+- Stuff that works well for us: [https://github.com/Tradeshift/ts-reaktive/](https://github.com/Tradeshift/ts-reaktive/)
+  - `ts-reaktive-actors`: Persistent actor base classes with reasonable defaults, and HTTP API for event journal
+  - `ts-reaktive-marshal`: Non-blocking marshalling framework for akka streams
+  - `ts-reaktive-replication`: Master-slave replication across data centers for persistent actors
+
+---
+
+# Stateful persistent actor 
+
+```
+AbstractStatefulPersistentActor
+```
+
+---
+
+# Event journal over HTTP
+
+TODO explain chunked stream
+
+---
+
+# Use case: collaboration
+
+.center[![Collaboration architecture](collaboration.svg)]
+
+- _Content_ backend has API to add messages to conversations
+  - Messages go into the event journal
+  - Journal is queryable over HTTP
+- _Presentation_ backend listens to event stream
+  - Materializes into views that are UI dependent
+  - Can combine other sources as well
+- Browser talks to both Presentation and Content backends
+- Web socket stream informs browser of incoming messages
+
+    </textarea>
+    <script src="remark-latest.min.js"></script>
+    <script>
+      var slideshow = remark.create({
+          highlightLanguage: "java",
+          highlightLines: true
+      });
+    </script>
+</html>
