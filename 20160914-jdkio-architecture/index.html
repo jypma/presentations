@@ -15,6 +15,7 @@
       }
       .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
       .small { font-size: 75%; }
+      .floatright { float: right; }
     </style>
   </head>
   <body>
@@ -35,7 +36,7 @@ jyp@tradeshift.com
 # Agenda
 
 - A bit of Tradeshift history
-- Typical sources of failures
+  - Typical sources of failures
 - Introduction to actors and akka
 - Event sourcing
 - Example use case: collaboration
@@ -44,20 +45,20 @@ jyp@tradeshift.com
 
 # Tradeshift in 2011
 
-TODO picture
+.center[![Tradeshift system](tsold.svg)]
 
 - Two major software components
   - _the frontend_
   - _the backend_
 - &lt;10 developers
 
---
+---
 
 # Tradeshift in 2016
 
-TODO picture
+.center[![Tradeshift system](tsnew.svg)]
 
-- 30 deployed components
+- 30 deployed components (and growing)
 - 150 developers
 - 250.000 LoC in _the backend_
 
@@ -96,7 +97,7 @@ TODO picture
 
 # Typical sources of failures
 
-- TODO picture here Browser -> Proxy -> Frontend -> Workflow -> App-Service -> Backend -> Database
+.center[![Tradeshift flow](tsflow.svg)]
 
 - We're down!
   - We overloaded the database
@@ -105,39 +106,54 @@ TODO picture
   - which caused our users' web browsers to respond slowly
   - which caused our users to reload their page
   - `GOTO 10`
-[note: lock up threads]
 
+
+--
 
 - Enter the buzzwords
   - Let it crash [2003, Amstrong]
   - Micro-services [2005, Rodgers]
-  - Self-contained systems [2015]
+  - Self-contained systems [2015, [scs-architecture.org](http://scs-architecture.org)]
 
 ---
 
-# Design rules
+# Self-contained systems
 
-- TODO picture here: vertical stack of a service, stressing async comms between services
+.floatright[![Async comm](async.svg)]
 
-- No syncronous outgoing calls while handling an incoming request
+- No outgoing calls while handling an incoming request
   - (except to our own databases)
-  - All inter-service communication must be asynchronous
+  - All inter-service communication must be **asynchronous**
+  - This implies data replication
+
+
 - No single points of failure
   - System must be clustered
+  
+  
 - Design must trivially scale to 10x expected load
 
 ---
 
 # Event sourcing
 
-- TODO picture here: aggregates with events, e.g. users with address and password changes, including event stream
+.center[![Event sourcing](eventsource.svg)]
 
-- System considers an *append-only* journal of *Events* the only source of truth
-- *Aggregate* is one unit of information to which (and only which) an event atomically applies
-- Events only have a guaranteed order within an aggregate (not across aggregates)
+- System considers an append-only **Event journal** the only source of truth
+- **Aggregate** is one unit of information to which (and only which) an event atomically applies
+- Events  have a guaranteed order, but only within an aggregate
+
+---
+
+# Event sourcing
+
+- Nice scalability properties
+  - Each aggregate can process changes independently
 - All information that spans >1 aggregate is materialized using *event listeners*
+
 - Traditionally only applied inside a system 
   - Synchronous APIs only ("_get customer history_")
+  
 - Why not expose event stream itself?
   - Eventual consistency
   - Latency implications
@@ -166,12 +182,12 @@ TODO picture
 
 # Actor ping pong 
 
-```java
+```
 public class PongActor extends UntypedActor {
 
     public void onReceive(Object message) {
         if (message instanceof String) {
-            log.info("In PongActor - received message: {}", message);
+            System.out.println("In PongActor - received message: " + message);
             getSender().tell("pong", getSelf());
         } 
     }
@@ -182,7 +198,8 @@ public class PongActor extends UntypedActor {
 
 # Actor ping pong 
 
-```java
+```
+public class Initialize {}
 public class PingActor extends AbstractActor {
     private int counter = 0;
     private ActorRef pongActor = getContext().actorOf(
@@ -190,11 +207,11 @@ public class PingActor extends AbstractActor {
     {
         receive(ReceiveBuilder
             .match(Initialize.class, msg -> {
-                log.info("In PingActor - starting ping-pong");
+                System.out.println("In PingActor - starting ping-pong");
                 pongActor.tell("ping", getSelf());
             })
             .match(String.class, msg -> {
-                log.info("In PingActor - received message: {}", message);
+                System.out.println("In PingActor - received message: " + message);
                 counter += 1;
                 if (counter == 3) {
                     getContext().system().shutdown();
@@ -210,17 +227,25 @@ public class PingActor extends AbstractActor {
 ---
 
 # Actor ping ping
-```java
+
+```
 public static void main() {
-    
+    ActorSystem system = ActorSystem.create();
+    ActorRef pingActor = system.actorOf(Props.create(PingActor.class));
+    PingActor.tell(new Initialize());
 }
 ```
 
---- 
-
-# Akka remoting
-
-
+Output:
+```
+In PingActor - starting ping-pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+In PongActor - received message: ping
+In PingActor - received message: pong
+```
 
 ---
 
@@ -230,11 +255,11 @@ public static void main() {
 - Persistence plugins for levelDB, cassandra, kafka, ...
 - Each `PersistentActor` has a `String` identifier, under which events are stored
 
-```java
+```j
 public class ChatActor extends AbstractPersistentActor {
   private final List<String> messages = new ArrayList<>();
   
-  @Override public String persistenceId() { return "chat-conversation-1"; }
+  @Override public String persistenceId() { return "67c67d28-4719-4bf9-bfe6-3944ed961a60"; }
   
   @Override public void receiveRecover(Object msg) {
     if (msg instanceof String) { messages.add((String)msg); }
@@ -252,21 +277,130 @@ public class ChatActor extends AbstractPersistentActor {
 
 ---
 
+# Akka remoting and clustering
+
+- Transparently lets actors communicate between systems
+- `ActorRef` can point to a remote actor
+- Messages must be serializable (using configurable mechanisms)
+
+```
+    akka {
+      actor {
+        provider = "akka.remote.RemoteActorRefProvider"
+      }
+      remote {
+        enabled-transports = ["akka.remote.netty.tcp"]
+        netty.tcp {
+          hostname = "127.0.0.1"
+          port = 2552
+        }
+      }
+      cluster {
+        seed-nodes = [
+          "akka.tcp://ClusterSystem@127.0.0.1:2551",
+          "akka.tcp://ClusterSystem@127.0.0.1:2552"]
+      }
+    }
+```
+
+---
+
 # Akka cluster sharding
 
+- Dynamically distributes a group of actors across an akka cluster
+- `MessageExtractor` informs cluster sharding where a particular message should go
+
+```
+class ChatMessage { UUID conversation; String msg; }
+
+class MyMessageExtractor implements MessageExtractor {
+    private final int numberOfShards = 256;
+    
+    @Override public String entityId(Object command) {
+        return ChatMessage.cast(command).conversation.toString();
+    }
+
+    @Override public String shardId(Object command) {
+        return String.valueOf(entityId(command).hashCode() % numberOfShards);
+    }
+    
+    @Override public Object entityMessage(Object command) {
+        return ChatMessage.cast(command).msg;
+    }
+}
+
+```
+
+---
+
+# Akka cluster sharding
+
+- `ShardRegion` proxy sits between client and real (remote) persistent actor
+- Persistent actor names will be their persistence id
+
+```
+public class ChatActor extends AbstractPersistentActor {
+  // ...
+  
+  @Override public String persistenceId() { return getSelf().path().name(); }
+}
+
+ActorRef proxy = ClusterSharding.get(system).start(
+            "conversations",
+            Props.create(ChatActor.class),
+            ClusterShardingSettings.create(system), 
+            new MyMessageExtractor());
+
+proxy.tell(new ChatMessage(
+  UUID.fromString("67c67d28-4719-4bf9-bfe6-3944ed961a60"),
+  "hello!"));
+```
 
 ---
 
 # Putting it all together
 
-- In production: collaboration
+- 2015: Let's try it out first
+
+- 2016: _Collaboration_ in production
+  - Real-time text message exchange between employees
+  - Text interface to automated travel agent
+  
 - In development: documents, FTP
 
-- Introduce ts-reaktive
+- Stuff that works well for us: [https://github.com/Tradeshift/ts-reaktive/](https://github.com/Tradeshift/ts-reaktive/)
+  - `ts-reaktive-actors`: Persistent actor base classes with reasonable defaults, and HTTP API for event journal
+  - `ts-reaktive-marshal`: Non-blocking marshalling framework for akka streams
+  - `ts-reaktive-replication`: Master-slave replication across data centers for persistent actors
+
+---
+
+# Stateful persistent actor 
+
+```
+AbstractStatefulPersistentActor
+```
+
+---
+
+# Event journal over HTTP
+
+TODO explain chunked stream
 
 ---
 
 # Use case: collaboration
+
+.center[![Collaboration architecture](collaboration.svg)]
+
+- _Content_ backend has API to add messages to conversations
+  - Messages go into the event journal
+  - Journal is queryable over HTTP
+- _Presentation_ backend listens to event stream
+  - Materializes into views that are UI dependent
+  - Can combine other sources as well
+- Browser talks to both Presentation and Content backends
+- Web socket stream informs browser of incoming messages
 
     </textarea>
     <script src="remark-latest.min.js"></script>
